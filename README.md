@@ -135,8 +135,11 @@ Backend is deployed to Render/Railway free tier for a stable public HTTPS URL (s
 `uvicorn api.main:app --host 0.0.0.0 --port $PORT`). Frontend is built in Lovable and
 calls this API directly via `fetch` — it does not scaffold its own backend.
 
-**Live API:** _add your deployed URL here before submission_
+**Live API:** https://ai-risk-manager-kl0x.onrender.com ([`/health`](https://ai-risk-manager-kl0x.onrender.com/health) · [`/metrics`](https://ai-risk-manager-kl0x.onrender.com/metrics))
 **Live frontend:** _add your Lovable app URL here before submission_
+
+Note: Render's free tier spins down after 15 min idle and takes ~30-60s to wake on the
+next request — hit `/health` a minute before a live demo to warm it up.
 
 ## Out of scope
 

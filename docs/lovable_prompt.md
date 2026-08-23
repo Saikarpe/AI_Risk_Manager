@@ -1,15 +1,17 @@
 # Lovable Frontend Prompt
 
-Paste this into Lovable as your initial project prompt. Replace `<YOUR_API_URL>` with
-your deployed Render/Railway URL once you have it (use `http://localhost:8000` for local
-testing first).
+Paste this into Lovable as your initial project prompt. The API is already deployed —
+use this URL as `<YOUR_API_URL>`:
+
+```
+https://ai-risk-manager-kl0x.onrender.com
+```
 
 ---
 
 Build a frontend-only React dashboard called **"Return-Risk Scorer"** for an e-commerce
 merchant. **Do not scaffold a backend or use Supabase — this app only calls an external
-REST API via `fetch`.** The API base URL is `<YOUR_API_URL>` (e.g.
-`https://your-app.onrender.com`).
+REST API via `fetch`.** The API base URL is `https://ai-risk-manager-kl0x.onrender.com`.
 
 ## API contract (use these exact field names — do not rename anything)
 
