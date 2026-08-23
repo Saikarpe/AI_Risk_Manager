@@ -1,0 +1,91 @@
+{
+  "grain": "one row = one order at the moment of purchase (before fulfillment)",
+  "target": "returned_or_disputed",
+  "target_definition": "1 if the order was returned or disputed within 30 days of delivery, else 0",
+  "fields": [
+    {
+      "name": "order_id",
+      "type": "string",
+      "role": "identifier",
+      "example": "ORD100234",
+      "note": "Unique key, not a model feature"
+    },
+    {
+      "name": "order_value",
+      "type": "numeric",
+      "unit": "INR",
+      "role": "feature",
+      "example": 4999,
+      "why": "High-value orders have more return incentive"
+    },
+    {
+      "name": "category",
+      "type": "categorical",
+      "role": "feature",
+      "values": ["electronics", "apparel", "home", "beauty", "grocery"],
+      "why": "Return rates vary sharply by category"
+    },
+    {
+      "name": "customer_type",
+      "type": "categorical",
+      "role": "feature",
+      "values": ["new", "returning"],
+      "why": "New customers are statistically higher-risk"
+    },
+    {
+      "name": "customer_order_count",
+      "type": "numeric",
+      "role": "feature",
+      "example": 27,
+      "why": "Proxy for trust/loyalty; 0 for new customers"
+    },
+    {
+      "name": "payment_method",
+      "type": "categorical",
+      "role": "feature",
+      "values": ["UPI", "card", "netbanking", "COD", "wallet"],
+      "why": "COD correlates with higher RTO/return risk"
+    },
+    {
+      "name": "delivery_pincode_risk_tier",
+      "type": "categorical",
+      "role": "feature",
+      "values": ["low", "medium", "high"],
+      "why": "Proxy for logistics/fraud-prone zones"
+    },
+    {
+      "name": "discount_percent",
+      "type": "numeric",
+      "role": "feature",
+      "example": 60,
+      "range": [0, 80],
+      "why": "Heavy discounts sometimes correlate with impulse returns"
+    },
+    {
+      "name": "order_hour",
+      "type": "numeric",
+      "role": "feature",
+      "range": [0, 23],
+      "why": "Late-night impulse buys skew riskier"
+    },
+    {
+      "name": "day_of_week",
+      "type": "categorical",
+      "role": "feature",
+      "values": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+      "why": "Weekend impulse buys skew riskier"
+    },
+    {
+      "name": "returned_or_disputed",
+      "type": "binary",
+      "role": "label",
+      "values": [0, 1],
+      "why": "Target variable"
+    }
+  ],
+  "notes": [
+    "These exact field names are the CSV columns, the FastAPI JSON keys, and the Lovable UI labels. No renaming mid-project.",
+    "Base rate is sampled realistically (~5-15%), not 50/50. Use PR-AUC and class weighting, not plain accuracy.",
+    "order_id is dropped before training; it is never a model feature."
+  ]
+}

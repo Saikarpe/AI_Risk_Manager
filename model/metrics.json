@@ -1,0 +1,46 @@
+{
+  "model": "XGBClassifier",
+  "n_train": 6400,
+  "n_test": 1600,
+  "train_positive_rate": 0.0944,
+  "test_positive_rate": 0.0944,
+  "pr_auc": 0.2486,
+  "roc_auc": 0.7257,
+  "chosen_threshold": 0.53,
+  "precision_at_threshold": 0.2355,
+  "recall_at_threshold": 0.5364,
+  "f1_at_threshold": 0.3273,
+  "flag_rate_at_threshold": 0.215,
+  "confusion_matrix_at_threshold": {
+    "true_negative": 1186,
+    "false_positive": 263,
+    "false_negative": 70,
+    "true_positive": 81
+  },
+  "cost_assumptions": {
+    "false_negative_fixed_cost_inr": 150.0,
+    "false_negative_value_fraction": 0.12,
+    "false_positive_fixed_cost_inr": 20.0,
+    "false_positive_abandon_probability": 0.08,
+    "note": "FN = missed risky order: merchant eats shipping + restocking + payment fees (~12% of order value) plus a fixed handling cost. FP = false flag: fixed manual-verification cost, PLUS an 8% chance the added friction causes a genuinely good customer to abandon the order (a lost sale worth the full order value). Both costs scale with order value, which keeps the optimal threshold from degenerating to 'flag almost everyone' \u2014 flagging is not free even though missing a return is worse."
+  },
+  "expected_cost_at_chosen_threshold": 189484.72,
+  "expected_cost_at_default_0.5": 212285.12,
+  "cost_savings_vs_default": 22800.4,
+  "recall_floor": 0.5,
+  "unconstrained_min_cost_threshold": 0.86,
+  "unconstrained_min_cost_recall": 0.0265,
+  "threshold_rationale": "Unconstrained cost-minimization picks threshold 0.86, which only catches 3% of risky orders \u2014 not operationally useful for a merchant who needs to catch most bad orders. We instead minimize expected cost subject to a business floor of catching at least 50% of risky orders, which selects threshold 0.53 (recall 54%, precision 24%). Costs: a missed risky order costs ~150 + 12% of order value (shipping/restock/fees); a false flag costs a fixed ~20 plus an 8% chance of losing the sale outright (friction-driven abandonment on a genuine customer).",
+  "feature_names": [
+    "category",
+    "customer_type",
+    "payment_method",
+    "delivery_pincode_risk_tier",
+    "day_of_week",
+    "order_value",
+    "customer_order_count",
+    "discount_percent",
+    "order_hour"
+  ],
+  "target": "returned_or_disputed"
+}
