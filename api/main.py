@@ -12,14 +12,12 @@ Run locally:
 
 import json
 import os
-import traceback
 from typing import Literal
 
 import joblib
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -48,21 +46,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# TEMP DEBUG: surface the real traceback in the response instead of a bare 500,
-# so a production-only failure can be diagnosed without dashboard log access.
-# Remove before final submission.
-@app.exception_handler(Exception)
-async def debug_exception_handler(request: Request, exc: Exception):
-    return JSONResponse(
-        status_code=500,
-        content={
-            "error": str(exc),
-            "type": type(exc).__name__,
-            "traceback": traceback.format_exc(),
-        },
-    )
-
 
 _model = None
 _metrics = None
@@ -110,27 +93,6 @@ class ScoreResponse(BaseModel):
 @app.get("/health")
 def health():
     return {"status": "ok"}
-
-
-@app.get("/debug/versions")
-def debug_versions():
-    import sys
-    import sklearn
-    import xgboost
-    import numpy
-    import pandas as pd_mod
-
-    return {
-        "python": sys.version,
-        "sklearn": sklearn.__version__,
-        "xgboost": xgboost.__version__,
-        "pandas": pd_mod.__version__,
-        "numpy": numpy.__version__,
-        "joblib": joblib.__version__,
-        "model_path": MODEL_PATH,
-        "model_exists": os.path.exists(MODEL_PATH),
-        "model_size_bytes": os.path.getsize(MODEL_PATH) if os.path.exists(MODEL_PATH) else None,
-    }
 
 
 @app.post("/score", response_model=ScoreResponse)
