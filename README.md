@@ -136,7 +136,7 @@ Backend is deployed to Render/Railway free tier for a stable public HTTPS URL (s
 calls this API directly via `fetch` — it does not scaffold its own backend.
 
 **Live API:** https://ai-risk-manager-kl0x.onrender.com ([`/health`](https://ai-risk-manager-kl0x.onrender.com/health) · [`/metrics`](https://ai-risk-manager-kl0x.onrender.com/metrics))
-**Live frontend:** _add your Lovable app URL here before submission_
+**Live frontend:** https://learning-horizon-helper.lovable.app
 
 Note: Render's free tier spins down after 15 min idle and takes ~30-60s to wake on the
 next request — hit `/health` a minute before a live demo to warm it up.
