@@ -11,22 +11,36 @@ Run locally:
     uvicorn api.main:app --reload --port 8000
 """
 
+import csv
+import io
 import json
 import os
-from typing import Literal
+from typing import Any, Literal, Optional
 
 import joblib
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+
+from api.explain import CATEGORICAL, NUMERIC, explain_batch
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODEL_PATH = os.path.join(BASE_DIR, "model", "model.pkl")
 METRICS_PATH = os.path.join(BASE_DIR, "model", "metrics.json")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
+
+# Optional API key. If API_KEY env var is set, /score, /score/batch and
+# /score/csv require an X-API-Key header. If unset, endpoints stay open
+# so local dev and unauthenticated demos still work.
+API_KEY = os.environ.get("API_KEY", "").strip()
+
+# Cap CSV uploads at ~2 MB / 5k rows to keep a single request bounded on the
+# free Render tier (~512 MB RAM, one worker).
+MAX_CSV_BYTES = 2 * 1024 * 1024
+MAX_CSV_ROWS = 5000
 
 app = FastAPI(
     title="Pre-Shipment Return-Risk Scorer",
@@ -77,6 +91,17 @@ def get_metrics():
     return _metrics
 
 
+def require_api_key(x_api_key: Optional[str] = Header(default=None)):
+    if API_KEY and x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key.")
+
+
+class Reason(BaseModel):
+    feature: str
+    value: Any = None
+    impact: float
+
+
 class OrderRequest(BaseModel):
     order_id: str = Field(..., example="ORD100234")
     order_value: float = Field(..., gt=0, example=4999)
@@ -95,6 +120,7 @@ class ScoreResponse(BaseModel):
     risk_score: float
     flagged: bool
     threshold_used: float
+    top_reasons: list[Reason] = []
 
 
 # ===== Dashboard HTML =====
@@ -121,9 +147,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </div>
       </a>
       <div class="nav-links">
-        <a href="#metrics" class="nav-link active">Metrics</a>
-        <a href="#scorer" class="nav-link">Score Order</a>
+        <a href="#scorer" class="nav-link active">Score</a>
+        <a href="#batch" class="nav-link">Batch</a>
         <a href="#features" class="nav-link">Features</a>
+        <a href="#metrics" class="nav-link">Model</a>
         <a href="#api" class="nav-link">API</a>
         <a href="/docs" class="nav-link">Swagger ↗</a>
       </div>
@@ -147,94 +174,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         and protect margins with ML-powered risk scoring.
       </p>
       <div class="hero-actions">
-        <a href="#scorer" class="btn btn-primary">⚡ Try the Scorer</a>
-        <a href="#metrics" class="btn btn-secondary">📊 View Metrics</a>
+        <a href="#scorer" class="btn btn-primary">⚡ Score an Order</a>
+        <a href="#batch" class="btn btn-secondary">📂 Batch Upload</a>
         <a href="/docs" class="btn btn-secondary">📖 API Docs</a>
-      </div>
-    </div>
-  </section>
-
-  <!-- ===== Model Metrics ===== -->
-  <section class="section" id="metrics">
-    <div class="container">
-      <div class="section-header">
-        <h2 class="section-title">📊 Model Performance</h2>
-        <p class="section-subtitle">XGBClassifier trained on 6,400 orders · Evaluated on 1,600 held-out orders</p>
-      </div>
-
-      <div class="metrics-grid">
-        <div class="metric-card">
-          <div class="metric-icon purple">📈</div>
-          <div class="metric-label">ROC-AUC</div>
-          <div class="metric-value" id="metric-roc-auc">—</div>
-          <div class="metric-detail">Area under ROC curve</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-icon blue">🎯</div>
-          <div class="metric-label">PR-AUC</div>
-          <div class="metric-value" id="metric-pr-auc">—</div>
-          <div class="metric-detail">Precision-recall area</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-icon green">✅</div>
-          <div class="metric-label">Precision</div>
-          <div class="metric-value" id="metric-precision">—</div>
-          <div class="metric-detail">At chosen threshold</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-icon orange">🔍</div>
-          <div class="metric-label">Recall</div>
-          <div class="metric-value" id="metric-recall">—</div>
-          <div class="metric-detail">Risky orders caught</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-icon blue">⚖️</div>
-          <div class="metric-label">F1 Score</div>
-          <div class="metric-value" id="metric-f1">—</div>
-          <div class="metric-detail">Harmonic mean</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-icon purple">🎚️</div>
-          <div class="metric-label">Threshold</div>
-          <div class="metric-value" id="metric-threshold">—</div>
-          <div class="metric-detail">Cost-optimized cutoff</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-icon orange">🚩</div>
-          <div class="metric-label">Flag Rate</div>
-          <div class="metric-value" id="metric-flag-rate">—</div>
-          <div class="metric-detail">Orders flagged</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-icon green">💰</div>
-          <div class="metric-label">Cost Savings</div>
-          <div class="metric-value" id="metric-cost-savings">—</div>
-          <div class="metric-detail">vs. default 0.5 threshold</div>
-        </div>
-      </div>
-
-      <!-- Confusion Matrix -->
-      <div class="section-header" style="margin-top: 40px;">
-        <h2 class="section-title">🧮 Confusion Matrix</h2>
-        <p class="section-subtitle">At the cost-optimized threshold on held-out test set</p>
-      </div>
-      <div class="confusion-grid">
-        <div class="confusion-cell tn">
-          <div class="cell-value" id="cm-tn">—</div>
-          <div class="cell-label">True Negative</div>
-        </div>
-        <div class="confusion-cell fp">
-          <div class="cell-value" id="cm-fp">—</div>
-          <div class="cell-label">False Positive</div>
-        </div>
-        <div class="confusion-cell fn">
-          <div class="cell-value" id="cm-fn">—</div>
-          <div class="cell-label">False Negative</div>
-        </div>
-        <div class="confusion-cell tp">
-          <div class="cell-value" id="cm-tp">—</div>
-          <div class="cell-label">True Positive</div>
-        </div>
       </div>
     </div>
   </section>
@@ -359,6 +301,62 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <span class="detail-value" id="res-flagged">—</span>
               </div>
             </div>
+            <div class="reasons-panel">
+              <div class="reasons-title">Top contributing factors</div>
+              <div class="reasons-list" id="reasons-list"></div>
+              <div class="reasons-legend">
+                <span><i class="dot dot-up"></i>Raises risk</span>
+                <span><i class="dot dot-down"></i>Lowers risk</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Batch Scoring ===== -->
+  <section class="section" id="batch">
+    <div class="container">
+      <div class="section-header">
+        <h2 class="section-title">📂 Batch Score from CSV</h2>
+        <p class="section-subtitle">Upload a CSV of orders to score them in bulk. Download results with reasons.</p>
+      </div>
+
+      <div class="batch-panel">
+        <div class="batch-upload">
+          <label class="drop-zone" id="drop-zone" for="csv-input">
+            <div class="drop-icon">📄</div>
+            <div class="drop-text"><strong>Drop CSV here</strong> or click to browse</div>
+            <div class="drop-hint">Columns: order_id, category, customer_type, payment_method, delivery_pincode_risk_tier, day_of_week, order_value, customer_order_count, discount_percent, order_hour</div>
+            <input type="file" id="csv-input" accept=".csv,text/csv" hidden />
+          </label>
+          <div class="batch-actions">
+            <a href="#" id="download-sample" class="btn btn-secondary">⬇ Sample CSV</a>
+            <button id="download-scored" class="btn btn-secondary" disabled>⬇ Download scored CSV</button>
+          </div>
+          <div class="batch-status" id="batch-status"></div>
+        </div>
+
+        <div class="batch-results" id="batch-results" hidden>
+          <div class="batch-summary" id="batch-summary"></div>
+          <div class="table-wrap">
+            <table class="results-table" id="results-table">
+              <thead>
+                <tr>
+                  <th data-sort="order_id">Order ID</th>
+                  <th data-sort="risk_score">Risk</th>
+                  <th data-sort="flagged">Status</th>
+                  <th>Top reasons</th>
+                </tr>
+              </thead>
+              <tbody id="results-tbody"></tbody>
+            </table>
+          </div>
+          <div class="table-pager">
+            <button id="page-prev" class="btn btn-secondary">← Prev</button>
+            <span id="page-info">—</span>
+            <button id="page-next" class="btn btn-secondary">Next →</button>
           </div>
         </div>
       </div>
@@ -422,6 +420,91 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
   </section>
 
+  <!-- ===== Model Metrics ===== -->
+  <section class="section" id="metrics">
+    <div class="container">
+      <div class="section-header">
+        <h2 class="section-title">📊 Model Performance</h2>
+        <p class="section-subtitle">XGBClassifier trained on 6,400 orders · Evaluated on 1,600 held-out orders</p>
+      </div>
+
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-icon purple">📈</div>
+          <div class="metric-label">ROC-AUC</div>
+          <div class="metric-value" id="metric-roc-auc">—</div>
+          <div class="metric-detail">Area under ROC curve</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon blue">🎯</div>
+          <div class="metric-label">PR-AUC</div>
+          <div class="metric-value" id="metric-pr-auc">—</div>
+          <div class="metric-detail">Precision-recall area</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon green">✅</div>
+          <div class="metric-label">Precision</div>
+          <div class="metric-value" id="metric-precision">—</div>
+          <div class="metric-detail">At chosen threshold</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon orange">🔍</div>
+          <div class="metric-label">Recall</div>
+          <div class="metric-value" id="metric-recall">—</div>
+          <div class="metric-detail">Risky orders caught</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon blue">⚖️</div>
+          <div class="metric-label">F1 Score</div>
+          <div class="metric-value" id="metric-f1">—</div>
+          <div class="metric-detail">Harmonic mean</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon purple">🎚️</div>
+          <div class="metric-label">Threshold</div>
+          <div class="metric-value" id="metric-threshold">—</div>
+          <div class="metric-detail">Cost-optimized cutoff</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon orange">🚩</div>
+          <div class="metric-label">Flag Rate</div>
+          <div class="metric-value" id="metric-flag-rate">—</div>
+          <div class="metric-detail">Orders flagged</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon green">💰</div>
+          <div class="metric-label">Cost Savings</div>
+          <div class="metric-value" id="metric-cost-savings">—</div>
+          <div class="metric-detail">vs. default 0.5 threshold</div>
+        </div>
+      </div>
+
+      <!-- Confusion Matrix -->
+      <div class="section-header" style="margin-top: 40px;">
+        <h2 class="section-title">🧮 Confusion Matrix</h2>
+        <p class="section-subtitle">At the cost-optimized threshold on held-out test set</p>
+      </div>
+      <div class="confusion-grid">
+        <div class="confusion-cell tn">
+          <div class="cell-value" id="cm-tn">—</div>
+          <div class="cell-label">True Negative</div>
+        </div>
+        <div class="confusion-cell fp">
+          <div class="cell-value" id="cm-fp">—</div>
+          <div class="cell-label">False Positive</div>
+        </div>
+        <div class="confusion-cell fn">
+          <div class="cell-value" id="cm-fn">—</div>
+          <div class="cell-label">False Negative</div>
+        </div>
+        <div class="confusion-cell tp">
+          <div class="cell-value" id="cm-tp">—</div>
+          <div class="cell-label">True Positive</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ===== API Reference ===== -->
   <section class="section" id="api">
     <div class="container">
@@ -433,12 +516,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <div class="api-card">
           <span class="api-method post">POST</span>
           <div class="api-path">/score</div>
-          <p class="api-desc">Score a single order for return/dispute risk. Accepts order JSON, returns risk_score (0–1), flagged boolean, and threshold used.</p>
+          <p class="api-desc">Score a single order for return/dispute risk. Accepts order JSON, returns risk_score (0–1), flagged boolean, threshold used, and top_reasons (top 3 contributing features with signed impact).</p>
         </div>
         <div class="api-card">
           <span class="api-method post">POST</span>
           <div class="api-path">/score/batch</div>
-          <p class="api-desc">Score multiple orders in a single request. Accepts an array of orders, returns an array of scored results.</p>
+          <p class="api-desc">Score multiple orders in a single JSON request. Returns per-order score, flagged, and top_reasons.</p>
+        </div>
+        <div class="api-card">
+          <span class="api-method post">POST</span>
+          <div class="api-path">/score/csv</div>
+          <p class="api-desc">Upload a CSV (multipart file) with the same columns as the JSON schema; returns scored results with reasons. Cap: 2 MB / 5,000 rows per request.</p>
         </div>
         <div class="api-card">
           <span class="api-method get">GET</span>
@@ -487,51 +575,8 @@ def health():
     return {"status": "ok"}
 
 
-@app.post("/score", response_model=ScoreResponse)
-def score_order(order: OrderRequest):
-    model = get_model()
-    metrics = get_metrics()
-    threshold = metrics.get("chosen_threshold", 0.5)
-
-    row = pd.DataFrame(
-        [
-            {
-                "category": order.category,
-                "customer_type": order.customer_type,
-                "payment_method": order.payment_method,
-                "delivery_pincode_risk_tier": order.delivery_pincode_risk_tier,
-                "day_of_week": order.day_of_week,
-                "order_value": order.order_value,
-                "customer_order_count": order.customer_order_count,
-                "discount_percent": order.discount_percent,
-                "order_hour": order.order_hour,
-            }
-        ]
-    )
-    prob = float(model.predict_proba(row)[:, 1][0])
-
-    return ScoreResponse(
-        order_id=order.order_id,
-        risk_score=round(prob, 4),
-        flagged=prob >= threshold,
-        threshold_used=threshold,
-    )
-
-
-class BatchScoreRequest(BaseModel):
-    orders: list[OrderRequest]
-
-
-@app.post("/score/batch")
-def score_batch(payload: BatchScoreRequest):
-    model = get_model()
-    metrics = get_metrics()
-    threshold = metrics.get("chosen_threshold", 0.5)
-
-    if not payload.orders:
-        return {"results": []}
-
-    rows = pd.DataFrame(
+def _orders_to_frame(orders: list[OrderRequest]) -> pd.DataFrame:
+    return pd.DataFrame(
         [
             {
                 "category": o.category,
@@ -544,10 +589,46 @@ def score_batch(payload: BatchScoreRequest):
                 "discount_percent": o.discount_percent,
                 "order_hour": o.order_hour,
             }
-            for o in payload.orders
+            for o in orders
         ]
     )
+
+
+@app.post("/score", response_model=ScoreResponse, dependencies=[Depends(require_api_key)])
+def score_order(order: OrderRequest):
+    model = get_model()
+    metrics = get_metrics()
+    threshold = metrics.get("chosen_threshold", 0.5)
+
+    row = _orders_to_frame([order])
+    prob = float(model.predict_proba(row)[:, 1][0])
+    reasons = explain_batch(model, row, top_k=3)[0]
+
+    return ScoreResponse(
+        order_id=order.order_id,
+        risk_score=round(prob, 4),
+        flagged=prob >= threshold,
+        threshold_used=threshold,
+        top_reasons=[Reason(**r) for r in reasons],
+    )
+
+
+class BatchScoreRequest(BaseModel):
+    orders: list[OrderRequest]
+
+
+@app.post("/score/batch", dependencies=[Depends(require_api_key)])
+def score_batch(payload: BatchScoreRequest):
+    model = get_model()
+    metrics = get_metrics()
+    threshold = metrics.get("chosen_threshold", 0.5)
+
+    if not payload.orders:
+        return {"results": []}
+
+    rows = _orders_to_frame(payload.orders)
     probs = model.predict_proba(rows)[:, 1]
+    reasons_all = explain_batch(model, rows, top_k=3)
 
     results = [
         {
@@ -555,10 +636,65 @@ def score_batch(payload: BatchScoreRequest):
             "risk_score": round(float(p), 4),
             "flagged": bool(p >= threshold),
             "threshold_used": threshold,
+            "top_reasons": reasons,
         }
-        for o, p in zip(payload.orders, probs)
+        for o, p, reasons in zip(payload.orders, probs, reasons_all)
     ]
     return {"results": results}
+
+
+REQUIRED_CSV_COLUMNS = ["order_id"] + CATEGORICAL + NUMERIC
+
+
+@app.post("/score/csv", dependencies=[Depends(require_api_key)])
+async def score_csv(file: UploadFile = File(...)):
+    """
+    Score a CSV of orders. Expected columns match schema.json:
+    order_id, category, customer_type, payment_method, delivery_pincode_risk_tier,
+    day_of_week, order_value, customer_order_count, discount_percent, order_hour.
+    Returns JSON with per-row score + flagged + top_reasons.
+    """
+    raw = await file.read()
+    if len(raw) > MAX_CSV_BYTES:
+        raise HTTPException(status_code=413, detail=f"CSV exceeds {MAX_CSV_BYTES // 1024} KB limit.")
+
+    try:
+        df = pd.read_csv(io.BytesIO(raw))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not parse CSV: {e}")
+
+    if len(df) == 0:
+        raise HTTPException(status_code=400, detail="CSV has no rows.")
+    if len(df) > MAX_CSV_ROWS:
+        raise HTTPException(status_code=413, detail=f"CSV exceeds {MAX_CSV_ROWS} row limit.")
+
+    missing = [c for c in REQUIRED_CSV_COLUMNS if c not in df.columns]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"CSV missing columns: {missing}")
+
+    model = get_model()
+    metrics = get_metrics()
+    threshold = metrics.get("chosen_threshold", 0.5)
+
+    feature_df = df[CATEGORICAL + NUMERIC].copy()
+    try:
+        probs = model.predict_proba(feature_df)[:, 1]
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Scoring failed — check CSV values: {e}")
+
+    reasons_all = explain_batch(model, feature_df, top_k=3)
+
+    results = [
+        {
+            "order_id": str(df["order_id"].iloc[i]),
+            "risk_score": round(float(probs[i]), 4),
+            "flagged": bool(probs[i] >= threshold),
+            "threshold_used": threshold,
+            "top_reasons": reasons_all[i],
+        }
+        for i in range(len(df))
+    ]
+    return {"results": results, "count": len(results)}
 
 
 @app.get("/metrics")
