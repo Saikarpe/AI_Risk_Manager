@@ -11,8 +11,6 @@ instead of treating every order identically.
 The model **flags and recommends — it never auto-cancels an order.** A human or
 downstream workflow makes the final call.
 
-![Architecture](docs/architecture.svg)
-
 ## Results (held out, never touched during training)
 
 | Metric | Value |
@@ -28,7 +26,6 @@ Full numbers: [`model/metrics.json`](model/metrics.json). Full threshold-by-thre
 cost curve: [`model/cost_curve.csv`](model/cost_curve.csv).
 
 **Why threshold 0.53, not 0.5:** see [Cost model & threshold selection](#cost-model--threshold-selection) below.
-**A case the model gets wrong, and why:** see [`docs/failure_cases.md`](docs/failure_cases.md).
 
 These numbers are honest, not flattering — precision of 24% means 3 in 4 flagged orders
 turn out fine. That's the real trade-off of catching half of a weak-signal problem at a
@@ -54,10 +51,6 @@ model/
   cost_curve.csv             # expected cost / precision / recall at every threshold
 api/
   main.py                    # FastAPI app: POST /score, POST /score/batch, GET /metrics
-docs/
-  architecture.svg           # one-page architecture diagram
-  failure_cases.md           # two real held-out cases the model gets wrong
-  video_script.md            # 5-min pitch video script & shot list
 requirements.txt             # ML stack pinned exactly to the env model.pkl was trained in
 .python-version              # 3.11.9 — read by Render's Python buildpack
 runtime.txt                  # 3.11.9 — same pin, second location the buildpack checks
