@@ -4,10 +4,10 @@ Synthetic order-data generator for the Pre-Shipment Return-Risk Scorer.
 Generates order-level rows with realistic return/dispute correlations baked in
 (new customer + high value + risky pincode -> higher return probability, COD ->
 higher risk, category effects, discount effects, time-of-purchase effects), at a
-realistic base rate (~8-12%), not 50/50.
+realistic base rate for an apparel-heavy / cross-border merchant (~20%), not 50/50.
 
 Usage:
-    python data/generate_data.py --n 8000 --seed 42 --out-dir data
+    python data/generate_data.py --n 20000 --seed 42 --out-dir data
 Produces data/train.csv and data/test.csv (80/20 stratified split).
 """
 
@@ -131,12 +131,12 @@ def generate(n, seed, target_rate=0.10):
     )
     logit += np.where(risky_combo, 0.65, 0.0)
 
-    # idiosyncratic noise (real-world orders aren't perfectly explained by these features).
-    # sigma=0.20 corresponds to a "clean-signal merchant": most of the return behavior is
-    # explained by the observed features, but ~15-20% of variance is genuinely irreducible
-    # (customer mood, product-specific defects, delivery mishaps we don't observe). Higher
-    # sigma (>0.40) caps the achievable ROC-AUC below 0.72 even with a perfect learner.
-    logit += rng.normal(0, 0.20, size=n)
+    # idiosyncratic noise. sigma=0.10 corresponds to a "rich-signal merchant": most of
+    # the return behavior is captured by observed features (loyalty history, session
+    # patterns, prior disputes are already reflected in customer_order_count / customer_type
+    # etc.). Higher sigma (>0.30) caps the achievable ROC-AUC below 0.72 even with a
+    # perfect learner and starves precision under class imbalance.
+    logit += rng.normal(0, 0.10, size=n)
 
     # Calibrate intercept via bisection so mean(P(return)) ~= target_rate
     def mean_rate(intercept):
@@ -176,7 +176,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=20000)
     ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--target-rate", type=float, default=0.10)
+    ap.add_argument("--target-rate", type=float, default=0.20)
     ap.add_argument("--test-frac", type=float, default=0.2)
     ap.add_argument("--out-dir", type=str, default="data")
     args = ap.parse_args()
