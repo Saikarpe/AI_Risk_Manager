@@ -28,23 +28,22 @@ from sklearn.metrics import (
     confusion_matrix,
 )
 from sklearn.compose import ColumnTransformer
+from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import FunctionTransformer, OneHotEncoder
 import xgboost as xgb
 
-CATEGORICAL = [
-    "category",
-    "customer_type",
-    "payment_method",
-    "delivery_pincode_risk_tier",
-    "day_of_week",
-]
-NUMERIC = [
-    "order_value",
-    "customer_order_count",
-    "discount_percent",
-    "order_hour",
-]
+# Feature engineering lives in model/features.py so joblib.load can resolve
+# the FunctionTransformer's callable at inference time. Keeping it in this
+# file would pickle a reference to __main__.add_derived_features, which
+# breaks when the API loads the model from a different process.
+from model.features import (
+    CATEGORICAL,
+    NUMERIC,
+    DERIVED_NUMERIC,
+    add_derived_features,
+)
+
 TARGET = "returned_or_disputed"
 ID_COL = "order_id"
 
@@ -68,19 +67,31 @@ def build_pipeline():
     pre = ColumnTransformer(
         transformers=[
             ("cat", OneHotEncoder(handle_unknown="ignore"), CATEGORICAL),
+            ("num", "passthrough", NUMERIC + DERIVED_NUMERIC),
         ],
-        remainder="passthrough",
+        remainder="drop",
     )
     clf = xgb.XGBClassifier(
-        n_estimators=300,
-        max_depth=4,
-        learning_rate=0.05,
+        n_estimators=800,
+        max_depth=5,
+        learning_rate=0.04,
         subsample=0.85,
-        colsample_bytree=0.85,
+        colsample_bytree=0.8,
+        min_child_weight=3,
+        reg_lambda=1.5,
+        reg_alpha=0.3,
+        gamma=0.1,
+        early_stopping_rounds=30,
         eval_metric="aucpr",
         random_state=42,
     )
-    return Pipeline([("pre", pre), ("clf", clf)])
+    return Pipeline(
+        [
+            ("features", FunctionTransformer(add_derived_features, validate=False)),
+            ("pre", pre),
+            ("clf", clf),
+        ]
+    )
 
 
 def expected_cost(y_true, y_prob, order_value, threshold):
@@ -113,7 +124,25 @@ def main():
 
     pipe = build_pipeline()
     pipe.set_params(clf__scale_pos_weight=scale_pos_weight)
-    pipe.fit(X_train, y_train)
+
+    # XGBoost early stopping needs a pre-transformed eval_set, which Pipeline.fit
+    # cannot pass through. Carve a stratified val split, fit the feature +
+    # preprocessing steps once, then fit the classifier separately with eval_set.
+    # The pipeline references the same feature/pre objects, so it stays usable
+    # for inference end-to-end after this.
+    X_tr, X_val, y_tr, y_val = train_test_split(
+        X_train, y_train, test_size=0.15, stratify=y_train, random_state=42
+    )
+    pre_only = Pipeline(pipe.steps[:-1])
+    X_tr_t = pre_only.fit_transform(X_tr, y_tr)
+    X_val_t = pre_only.transform(X_val)
+
+    pipe.named_steps["clf"].fit(
+        X_tr_t,
+        y_tr,
+        eval_set=[(X_val_t, y_val)],
+        verbose=False,
+    )
 
     y_prob = pipe.predict_proba(X_test)[:, 1]
 

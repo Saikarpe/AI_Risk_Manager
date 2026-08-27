@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import xgboost as xgb
+from sklearn.pipeline import Pipeline
 
 CATEGORICAL = [
     "category",
@@ -26,18 +27,35 @@ NUMERIC = [
     "order_hour",
 ]
 
+# Derived features are computed inside the pipeline. For user-facing
+# explanations we surface them under the raw schema field they most closely
+# reflect (e.g. is_late_night's contribution shows up as order_hour), so the
+# reason list always uses names an operator recognizes from the input form.
+DERIVED_TO_SOURCE = {
+    "is_late_night": "order_hour",
+    "is_weekend": "day_of_week",
+    "order_value_log": "order_value",
+    "new_cod": "payment_method",
+    "high_value": "order_value",
+    "new_high_pincode": "delivery_pincode_risk_tier",
+}
+
 
 def _map_transformed_to_original(transformed_names: list[str]) -> list[str]:
     """
     Map each ColumnTransformer output name back to the original schema field.
 
     OneHotEncoder columns look like ``cat__category_electronics``; passthrough
-    numerics look like ``remainder__order_value``. We strip the transformer
-    prefix and match against the known categorical / numeric lists.
+    numerics look like ``num__order_value`` or ``num__is_late_night``. Derived
+    features are collapsed back to their source schema field via
+    ``DERIVED_TO_SOURCE`` so the UI only shows names the operator entered.
     """
     out = []
     for name in transformed_names:
         tail = name.split("__", 1)[1] if "__" in name else name
+        if tail in DERIVED_TO_SOURCE:
+            out.append(DERIVED_TO_SOURCE[tail])
+            continue
         matched = None
         for cat in CATEGORICAL:
             if tail == cat or tail.startswith(cat + "_"):
@@ -71,10 +89,13 @@ def explain_batch(pipe, X_df: pd.DataFrame, top_k: int = 3) -> list[list[dict[st
     Values are in log-odds units (XGBoost's raw margin), so the sign is what
     matters for UI display, not the absolute magnitude.
     """
-    pre = pipe.named_steps["pre"]
     clf = pipe.named_steps["clf"]
+    # Everything up to the classifier: derived features + ColumnTransformer.
+    # Using pipe.steps[:-1] keeps this working whether the pipeline is
+    # [pre, clf] (old shape) or [features, pre, clf] (new shape).
+    pre_pipeline = Pipeline(pipe.steps[:-1])
 
-    X_transformed = pre.transform(X_df)
+    X_transformed = pre_pipeline.transform(X_df)
     if hasattr(X_transformed, "toarray"):
         X_transformed = X_transformed.toarray()
 
@@ -82,7 +103,7 @@ def explain_batch(pipe, X_df: pd.DataFrame, top_k: int = 3) -> list[list[dict[st
     contribs = clf.get_booster().predict(dmat, pred_contribs=True)
     contribs = contribs[:, :-1]  # drop bias column
 
-    transformed_names = pre.get_feature_names_out().tolist()
+    transformed_names = pipe.named_steps["pre"].get_feature_names_out().tolist()
     original_cols = _map_transformed_to_original(transformed_names)
 
     results: list[list[dict[str, Any]]] = []
