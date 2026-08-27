@@ -57,6 +57,7 @@ api/
 docs/
   architecture.svg           # one-page architecture diagram
   failure_cases.md           # two real held-out cases the model gets wrong
+  video_script.md            # 5-min pitch video script & shot list
 ```
 
 ## Setup
