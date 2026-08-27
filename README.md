@@ -58,6 +58,10 @@ docs/
   architecture.svg           # one-page architecture diagram
   failure_cases.md           # two real held-out cases the model gets wrong
   video_script.md            # 5-min pitch video script & shot list
+requirements.txt             # ML stack pinned exactly to the env model.pkl was trained in
+.python-version              # 3.11.9 — read by Render's Python buildpack
+runtime.txt                  # 3.11.9 — same pin, second location the buildpack checks
+render.yaml / Procfile       # deploy config + uvicorn start command
 ```
 
 ## Setup
@@ -131,10 +135,21 @@ configured in `api/main.py` before frontend integration, not after.
 
 ## Deployment
 
-Backend is deployed to Render/Railway free tier for a stable public HTTPS URL (see
-`api/main.py`; no code changes needed to deploy — point the platform's start command at
-`uvicorn api.main:app --host 0.0.0.0 --port $PORT`). Frontend is built in Lovable and
-calls this API directly via `fetch` — it does not scaffold its own backend.
+Backend runs on Render's free tier behind a stable public HTTPS URL; start command is
+`uvicorn api.main:app --host 0.0.0.0 --port $PORT` (`Procfile` / `render.yaml`). Frontend
+is built in Lovable and calls this API directly via `fetch` — it does not scaffold its
+own backend.
+
+**Two pins are load-bearing — don't relax them.** Both were found the hard way, in
+production:
+
+| File | Pin | Why |
+|---|---|---|
+| `.python-version` + `runtime.txt` | Python 3.11.9 | Render defaults this service to Python 3.14, which has no pandas 2.1.4 wheel, so pip source-builds it and fails to compile. `render.yaml`'s `PYTHON_VERSION` is **only** honored for Blueprint-created services, so it is silently ignored here — these two files are what the buildpack actually reads. |
+| `requirements.txt` | exact `==` on the ML stack (`pandas`, `numpy`, `scikit-learn`, `xgboost`, `joblib`) | `model.pkl` is a pickled sklearn Pipeline. Installing a newer scikit-learn/xgboost than the one that trained it breaks unpickling, so `/score` returns 500 in production while `/health` and `/metrics` — which never load the model — stay green. Serving-only deps (`fastapi`, `uvicorn`, `pydantic`, `faker`) stay on `>=` on purpose: they never touch the pickle. |
+
+Both are pinned to the environment the model was trained in. If you retrain, retrain on
+3.11.9 with these versions, or update the pins and the model together.
 
 **Live API:** https://ai-risk-manager-kl0x.onrender.com ([`/health`](https://ai-risk-manager-kl0x.onrender.com/health) · [`/metrics`](https://ai-risk-manager-kl0x.onrender.com/metrics))
 **Live frontend:** https://learning-horizon-helper.lovable.app
