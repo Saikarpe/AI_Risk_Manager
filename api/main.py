@@ -1,6 +1,6 @@
 """
 
-FastAPI serving layer for the Pre-Shipment Return-Risk Scorer.
+FastAPI serving layer for RazorGuard AI (AI-Powered Transaction Risk Intelligence).
 
 Endpoints:
     GET  /         - serves the interactive dashboard UI
@@ -44,7 +44,7 @@ MAX_CSV_BYTES = 2 * 1024 * 1024
 MAX_CSV_ROWS = 5000
 
 app = FastAPI(
-    title="Pre-Shipment Return-Risk Scorer",
+    title="RazorGuard AI",
     description="Scores incoming orders for return/dispute risk before fulfillment.",
     version="1.0.0",
 )
@@ -130,8 +130,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AI Risk Manager — Pre-Shipment Return-Risk Scorer</title>
-  <meta name="description" content="AI-powered pre-shipment return-risk scoring system. Score incoming e-commerce orders for return/dispute risk before fulfillment using XGBoost ML model." />
+  <title>RazorGuard AI — AI-Powered Transaction Risk Intelligence</title>
+  <meta name="description" content="RazorGuard AI: AI-powered transaction risk intelligence. Score incoming e-commerce orders for return/dispute risk before fulfillment using an XGBoost model with a cost-optimized threshold." />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>" />
   <link rel="stylesheet" href="/static/style.css" />
 </head>
@@ -143,8 +143,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <a href="#" class="nav-brand">
         <div class="nav-logo">🛡️</div>
         <div>
-          <div class="nav-title">AI Risk Manager</div>
-          <div class="nav-subtitle">Return-Risk Scorer</div>
+          <div class="nav-title">RazorGuard AI</div>
+          <div class="nav-subtitle">Transaction Risk Intelligence</div>
         </div>
       </a>
       <div class="nav-links">
@@ -166,8 +166,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <span>XGBoost · Cost-Optimized Threshold · Real-Time Scoring</span>
       </div>
       <h1>
-        Pre-Shipment<br />
-        <span class="gradient-text">Return-Risk Scorer</span>
+        RazorGuard<br />
+        <span class="gradient-text">AI Risk Intelligence</span>
       </h1>
       <p class="hero-description">
         Predict which e-commerce orders are likely to be returned or disputed
@@ -552,7 +552,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <footer class="footer">
     <div class="container">
       <p>
-        🛡️ AI Risk Manager · Pre-Shipment Return-Risk Scorer ·
+        🛡️ RazorGuard AI · AI-Powered Transaction Risk Intelligence ·
         Built with <a href="https://fastapi.tiangolo.com" target="_blank">FastAPI</a> &
         <a href="https://xgboost.readthedocs.io" target="_blank">XGBoost</a>
         · <a href="/docs">API Docs</a>

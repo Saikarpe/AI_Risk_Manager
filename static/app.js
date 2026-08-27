@@ -1,5 +1,5 @@
 /**
- * AI Risk Manager — Frontend Logic
+ * RazorGuard AI — Frontend Logic
  * Single-order scoring, batch CSV scoring, metric loading, animations.
  */
 

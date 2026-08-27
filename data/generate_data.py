@@ -1,5 +1,5 @@
 """
-Synthetic order-data generator for the Pre-Shipment Return-Risk Scorer.
+Synthetic order-data generator for RazorGuard AI.
 
 Generates order-level rows with realistic return/dispute correlations baked in
 (new customer + high value + risky pincode -> higher return probability, COD ->
